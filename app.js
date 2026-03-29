@@ -45,7 +45,11 @@ const state = {
     active: false,
     pointerId: null,
     x: 0,
-    y: 0
+    y: 0,
+    targetYawDelta: 0,
+    targetPitchDelta: 0,
+    yawVelocity: 0,
+    pitchVelocity: 0
   },
   movement: {
     forward: false,
@@ -58,7 +62,9 @@ const state = {
   },
   sceneReady: false,
   museumSceneReady: false,
-  error: ''
+  error: '',
+  shellBound: false,
+  sidebarDirty: true
 }
 
 const ui = {}
@@ -75,11 +81,18 @@ const world = {
   pois: [],
   clock: new THREE.Clock(),
   lastFrame: performance.now(),
+  animationFrameId: null,
   museumRenderer: null,
   museumScene: null,
   museumCamera: null,
   museumControls: null,
-  museumExhibitMeshes: []
+  museumExhibitMeshes: [],
+  museumAnimationFrameId: null,
+  diveCanvasHandlersBound: false,
+  diveCanvas: null,
+  resizeBound: false,
+  lastNearestSignalKey: '',
+  lastSidebarSignature: ''
 }
 
 function showToast(message, isError = false) {
@@ -102,11 +115,17 @@ function setError(message) {
   }
 }
 
+function markSidebarDirty() {
+  state.sidebarDirty = true
+}
+
 function rarityBadge(rarity) {
   return `<span class="badge ${rarity}">${rarity.toUpperCase()}</span>`
 }
 
 function renderAuth() {
+  cleanupDiveScene()
+  cleanupMuseumScene()
   document.getElementById('app').innerHTML = `
     <div class="auth-shell">
       <div class="auth-card">
@@ -222,14 +241,34 @@ function appShell() {
       </div>
     </div>
   `
+  state.shellBound = false
 }
 
-function renderSidebar() {
+function getSidebarSignature() {
+  return JSON.stringify({
+    displayName: userProfile?.display_name || 'Explorer',
+    museumName: userProfile?.museum_name || 'My Deep Sea Museum',
+    email: currentUser?.email || '',
+    oxygen: Math.round(state.dive.oxygen),
+    battery: Math.round(state.dive.battery),
+    depth: Math.round(state.dive.depth),
+    maxDepth: Math.round(state.dive.maxDepth),
+    photosTaken: state.dive.photosTaken,
+    specimensCollected: state.dive.specimensCollected,
+    cargo: state.dive.cargo.map((item) => `${item.species_key}:${item.depth_found}`).join('|'),
+    discoveries: state.dive.discoveries.slice(0, 5).map((item) => `${item.species_key}:${item.is_photo_captured ? 1 : 0}:${item.is_specimen_collected ? 1 : 0}`).join('|'),
+    leaderboard: (state.museum.leaderboard || []).slice(0, 4).map((entry) => `${entry.user_id}:${entry.completeness}:${entry.average_rating || 0}`).join('|')
+  })
+}
+
+function renderSidebar(force = false) {
   const sidebar = document.getElementById('sidebar')
   if (!sidebar) return
+  const signature = getSidebarSignature()
+  if (!force && !state.sidebarDirty && world.lastSidebarSignature === signature) return
+
   const discoveryCount = state.dive.discoveries.length
   const cargoCount = state.dive.cargo.length
-  const exhibitsCount = state.museum.exhibits.length
   sidebar.innerHTML = `
     <section class="panel user-card">
       <div class="panel-header">
@@ -354,8 +393,9 @@ function renderSidebar() {
         const nextName = document.getElementById('museum-name-input').value.trim()
         if (!nextName) return showToast('Museum name cannot be empty.', true)
         await updateMuseumName(nextName)
+        markSidebarDirty()
         showToast('Museum name updated.')
-        renderSidebar()
+        renderSidebar(true)
         renderScreen()
       } catch (error) {
         console.error('Museum name error:', error)
@@ -372,6 +412,9 @@ function renderSidebar() {
   } catch (error) {
     console.error('Sidebar bind error:', error)
   }
+
+  world.lastSidebarSignature = signature
+  state.sidebarDirty = false
 }
 
 function renderDiveScreen() {
@@ -567,14 +610,22 @@ function renderScreen() {
   })
   bindShellEvents()
   if (state.currentView === 'dive') {
+    cleanupMuseumScene()
     initDiveScene()
+  } else {
+    cleanupDiveScene(false)
   }
   if (state.currentView === 'museum') {
     initMuseumScene()
+  } else {
+    cleanupMuseumScene()
   }
+  markSidebarDirty()
+  renderSidebar()
 }
 
 function bindShellEvents() {
+  if (state.shellBound) return
   try {
     document.getElementById('logout-btn')?.addEventListener('click', async () => {
       await signOut()
@@ -589,52 +640,68 @@ function bindShellEvents() {
       })
     })
 
-    document.querySelectorAll('[data-move]').forEach((button) => {
-      const key = button.dataset.move
-      const activate = () => {
-        state.movement[key] = true
-        button.classList.add('active')
-      }
-      const deactivate = () => {
-        state.movement[key] = false
-        button.classList.remove('active')
-      }
-      button.addEventListener('pointerdown', activate)
-      button.addEventListener('pointerup', deactivate)
-      button.addEventListener('pointerleave', deactivate)
-      button.addEventListener('pointercancel', deactivate)
+    document.getElementById('main-view')?.addEventListener('pointerdown', (event) => {
+      const moveButton = event.target.closest('[data-move]')
+      if (!moveButton) return
+      const key = moveButton.dataset.move
+      state.movement[key] = true
+      moveButton.classList.add('active')
     })
 
-    document.getElementById('scan-btn')?.addEventListener('click', scanNearby)
-    document.getElementById('photo-btn')?.addEventListener('click', capturePhoto)
-    document.getElementById('auto-curate-btn')?.addEventListener('click', autoCurateMuseum)
-    document.getElementById('refresh-museum-btn')?.addEventListener('click', async () => {
-      await loadMuseumData()
-      renderSidebar()
-      renderScreen()
-    })
+    const releaseMove = (event) => {
+      const moveButton = event.target.closest('[data-move]')
+      if (!moveButton) return
+      const key = moveButton.dataset.move
+      state.movement[key] = false
+      moveButton.classList.remove('active')
+    }
 
-    document.querySelectorAll('[data-tour-owner]').forEach((button) => {
-      button.addEventListener('click', async () => {
-        state.museum.selectedMuseumOwner = button.dataset.tourOwner
-        state.currentView = 'museum'
-        await loadMuseumData(button.dataset.tourOwner)
-        renderSidebar()
+    document.getElementById('main-view')?.addEventListener('pointerup', releaseMove)
+    document.getElementById('main-view')?.addEventListener('pointercancel', releaseMove)
+    document.getElementById('main-view')?.addEventListener('pointerleave', releaseMove)
+
+    document.getElementById('main-view')?.addEventListener('click', async (event) => {
+      const scanButton = event.target.closest('#scan-btn')
+      if (scanButton) return scanNearby()
+
+      const photoButton = event.target.closest('#photo-btn')
+      if (photoButton) return capturePhoto()
+
+      const autoCurateButton = event.target.closest('#auto-curate-btn')
+      if (autoCurateButton) return autoCurateMuseum()
+
+      const refreshMuseumButton = event.target.closest('#refresh-museum-btn')
+      if (refreshMuseumButton) {
+        await loadMuseumData()
+        markSidebarDirty()
+        renderSidebar(true)
         renderScreen()
-      })
-    })
+        return
+      }
 
-    document.querySelectorAll('[data-rate-owner]').forEach((button) => {
-      button.addEventListener('click', () => {
-        state.museum.selectedMuseumOwner = button.dataset.rateOwner
+      const tourButton = event.target.closest('[data-tour-owner]')
+      if (tourButton) {
+        state.museum.selectedMuseumOwner = tourButton.dataset.tourOwner
+        state.currentView = 'museum'
+        await loadMuseumData(tourButton.dataset.tourOwner)
+        markSidebarDirty()
+        renderSidebar(true)
+        renderScreen()
+        return
+      }
+
+      const rateButton = event.target.closest('[data-rate-owner]')
+      if (rateButton) {
+        state.museum.selectedMuseumOwner = rateButton.dataset.rateOwner
         document.getElementById('rate-modal')?.classList.add('active')
-      })
+      }
     })
 
     document.getElementById('close-rate-modal')?.addEventListener('click', () => {
       document.getElementById('rate-modal')?.classList.remove('active')
     })
     document.getElementById('submit-rate-modal')?.addEventListener('click', submitMuseumRating)
+    state.shellBound = true
   } catch (error) {
     console.error('Bind shell events error:', error)
   }
@@ -648,16 +715,100 @@ function createRenderer(canvas) {
   return renderer
 }
 
+function disposeMaterial(material) {
+  if (!material) return
+  if (Array.isArray(material)) {
+    material.forEach(disposeMaterial)
+    return
+  }
+  material.dispose?.()
+}
+
+function disposeObject3D(object) {
+  if (!object) return
+  object.traverse((child) => {
+    child.geometry?.dispose?.()
+    disposeMaterial(child.material)
+    if (child.isLight && child.shadow?.map) {
+      child.shadow.map.dispose?.()
+    }
+  })
+}
+
+function cleanupDiveScene(resetReady = true) {
+  if (world.animationFrameId) {
+    cancelAnimationFrame(world.animationFrameId)
+    world.animationFrameId = null
+  }
+  if (world.renderer) {
+    world.renderer.dispose()
+    world.renderer.forceContextLoss?.()
+    world.renderer = null
+  }
+  if (world.scene) {
+    disposeObject3D(world.scene)
+    world.scene.clear()
+    world.scene = null
+  }
+  world.camera = null
+  world.submarine = null
+  world.oceanFloor = null
+  world.ambient = null
+  world.dirLight = null
+  world.particles = null
+  world.creatures = []
+  world.pois = []
+  world.diveCanvas = null
+  world.diveCanvasHandlersBound = false
+  world.lastNearestSignalKey = ''
+  state.touch.active = false
+  state.touch.pointerId = null
+  state.touch.targetYawDelta = 0
+  state.touch.targetPitchDelta = 0
+  state.touch.yawVelocity = 0
+  state.touch.pitchVelocity = 0
+  if (resetReady) state.sceneReady = false
+}
+
+function cleanupMuseumScene() {
+  if (world.museumAnimationFrameId) {
+    cancelAnimationFrame(world.museumAnimationFrameId)
+    world.museumAnimationFrameId = null
+  }
+  if (world.museumControls) {
+    world.museumControls.dispose()
+    world.museumControls = null
+  }
+  if (world.museumRenderer) {
+    world.museumRenderer.dispose()
+    world.museumRenderer.forceContextLoss?.()
+    world.museumRenderer = null
+  }
+  if (world.museumScene) {
+    disposeObject3D(world.museumScene)
+    world.museumScene.clear()
+    world.museumScene = null
+  }
+  world.museumCamera = null
+  world.museumExhibitMeshes = []
+  state.museumSceneReady = false
+}
+
 function initDiveScene() {
   try {
     const canvas = document.getElementById('scene')
-    if (!canvas || state.sceneReady) return
+    if (!canvas) return
+    if (state.sceneReady && world.renderer && world.diveCanvas === canvas) return
+
+    cleanupDiveScene()
     setError('')
     world.scene = new THREE.Scene()
     world.scene.fog = new THREE.FogExp2('#02101d', 0.0028)
     world.camera = new THREE.PerspectiveCamera(68, canvas.clientWidth / Math.max(canvas.clientHeight, 1), 0.1, 6000)
     world.camera.position.set(0, 4, 18)
     world.renderer = createRenderer(canvas)
+    world.diveCanvas = canvas
+    world.lastFrame = performance.now()
 
     const hemi = new THREE.HemisphereLight('#6fd6ff', '#02101d', 0.7)
     world.scene.add(hemi)
@@ -718,7 +869,10 @@ function initDiveScene() {
     createParticles()
     createCreaturesAndPOI()
     bindCanvasLook(canvas)
-    window.addEventListener('resize', handleResize)
+    if (!world.resizeBound) {
+      window.addEventListener('resize', handleResize)
+      world.resizeBound = true
+    }
     state.sceneReady = true
     animateDiveScene()
   } catch (error) {
@@ -765,7 +919,7 @@ function creatureMesh(species) {
 function createCreaturesAndPOI() {
   world.creatures = []
   world.pois = []
-  SPECIES.forEach((species, index) => {
+  SPECIES.forEach((species) => {
     for (let i = 0; i < 3; i += 1) {
       const mesh = creatureMesh(species)
       const depth = THREE.MathUtils.randFloat(species.min_depth, species.max_depth)
@@ -837,12 +991,15 @@ function biomeLabel(biome) {
 }
 
 function bindCanvasLook(canvas) {
+  if (world.diveCanvasHandlersBound && world.diveCanvas === canvas) return
   try {
     canvas.addEventListener('pointerdown', (event) => {
       state.touch.active = true
       state.touch.pointerId = event.pointerId
       state.touch.x = event.clientX
       state.touch.y = event.clientY
+      state.touch.targetYawDelta = 0
+      state.touch.targetPitchDelta = 0
       canvas.setPointerCapture(event.pointerId)
     })
     canvas.addEventListener('pointermove', (event) => {
@@ -851,8 +1008,8 @@ function bindCanvasLook(canvas) {
       const dy = event.clientY - state.touch.y
       state.touch.x = event.clientX
       state.touch.y = event.clientY
-      world.submarine.rotation.y -= dx * 0.0045
-      world.camera.rotation.x = THREE.MathUtils.clamp(world.camera.rotation.x - dy * 0.0025, -0.6, 0.45)
+      state.touch.targetYawDelta += -dx * 0.0042
+      state.touch.targetPitchDelta += -dy * 0.0022
     })
     const endTouch = (event) => {
       if (state.touch.pointerId === event.pointerId) {
@@ -862,9 +1019,25 @@ function bindCanvasLook(canvas) {
     }
     canvas.addEventListener('pointerup', endTouch)
     canvas.addEventListener('pointercancel', endTouch)
+    world.diveCanvasHandlersBound = true
   } catch (error) {
     console.error('Bind canvas look error:', error)
   }
+}
+
+function applyTouchLook(dt) {
+  if (!world.submarine || !world.camera) return
+  const smoothing = Math.min(1, dt * 10)
+  state.touch.yawVelocity += (state.touch.targetYawDelta - state.touch.yawVelocity) * smoothing
+  state.touch.pitchVelocity += (state.touch.targetPitchDelta - state.touch.pitchVelocity) * smoothing
+
+  world.submarine.rotation.y += state.touch.yawVelocity
+  world.camera.rotation.x = THREE.MathUtils.clamp(world.camera.rotation.x + state.touch.pitchVelocity, -0.6, 0.45)
+
+  state.touch.targetYawDelta *= 0.72
+  state.touch.targetPitchDelta *= 0.72
+  state.touch.yawVelocity *= 0.84
+  state.touch.pitchVelocity *= 0.84
 }
 
 function handleResize() {
@@ -891,12 +1064,13 @@ function handleResize() {
 }
 
 function animateDiveScene() {
-  if (!state.sceneReady || state.currentView !== 'dive') return
+  if (!state.sceneReady || state.currentView !== 'dive' || !world.renderer || !world.scene || !world.camera) return
   try {
     const now = performance.now()
     const dt = Math.min((now - world.lastFrame) / 1000, 0.05)
     world.lastFrame = now
 
+    applyTouchLook(dt)
     updateMovement(dt)
     updateCreatures(now * 0.001)
     updateHUD()
@@ -907,7 +1081,7 @@ function animateDiveScene() {
     world.camera.lookAt(world.submarine.position.clone().add(new THREE.Vector3(10, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), world.submarine.rotation.y)))
 
     world.renderer.render(world.scene, world.camera)
-    requestAnimationFrame(animateDiveScene)
+    world.animationFrameId = requestAnimationFrame(animateDiveScene)
   } catch (error) {
     console.error('Animate dive error:', error)
     setError(`Dive render error: ${error.message}`)
@@ -948,9 +1122,13 @@ function updateMovement(dt) {
   const nearest = findNearestSignal()
   const scan = document.getElementById('scan-details')
   if (scan) {
-    scan.innerHTML = nearest
-      ? `<strong>${nearest.label}</strong><div class="muted small">${nearest.distance} m away · ${nearest.meta}</div>`
-      : 'No strong signal detected nearby.'
+    const nextKey = nearest ? `${nearest.label}:${nearest.distance}:${nearest.meta}` : 'none'
+    if (nextKey !== world.lastNearestSignalKey) {
+      scan.innerHTML = nearest
+        ? `<strong>${nearest.label}</strong><div class="muted small">${nearest.distance} m away · ${nearest.meta}</div>`
+        : 'No strong signal detected nearby.'
+      world.lastNearestSignalKey = nextKey
+    }
   }
 }
 
@@ -964,6 +1142,7 @@ function updateCreatures(time) {
 }
 
 function updateHUD() {
+  markSidebarDirty()
   renderSidebar()
 }
 
@@ -1072,6 +1251,7 @@ async function scanNearby() {
         data.discovered = true
         data.specimenCollected = true
         state.dive.objective = `Recovered ${saved.species_name}. Search deeper for rarer life.`
+        markSidebarDirty()
         showToast(`Specimen collected: ${saved.species_name}`)
       }
     } else {
@@ -1079,7 +1259,7 @@ async function scanNearby() {
       state.dive.objective = `Logged point of interest: ${poi.label}. Photograph the area or search for nearby species.`
       showToast(`Logged ${poi.label}`)
     }
-    renderSidebar()
+    renderSidebar(true)
     renderScreen()
   } catch (error) {
     console.error('Scan error:', error)
@@ -1113,7 +1293,8 @@ async function capturePhoto() {
     } else {
       showToast('Wide-angle ocean photo captured.')
     }
-    renderSidebar()
+    markSidebarDirty()
+    renderSidebar(true)
     renderScreen()
   } catch (error) {
     console.error('Photo error:', error)
@@ -1148,7 +1329,8 @@ async function surfaceAndRefuel(forced = false) {
       world.submarine.position.set(0, -6, 0)
     }
     state.history = await fetchDiveHistory()
-    renderSidebar()
+    markSidebarDirty()
+    renderSidebar(true)
     renderScreen()
     showToast(forced ? 'Emergency surface complete. Systems restored.' : 'Surfaced and refueled.')
   } catch (error) {
@@ -1161,6 +1343,7 @@ async function loadMuseumData(ownerUserId = null) {
   try {
     state.museum.exhibits = await fetchMuseumExhibits(ownerUserId)
     state.museum.leaderboard = await fetchMuseumLeaderboard()
+    markSidebarDirty()
   } catch (error) {
     console.error('Load museum data error:', error)
   }
@@ -1177,7 +1360,7 @@ async function autoCurateMuseum() {
       await addExhibitFromDiscovery(entry.discovery, entry.position)
     }
     await loadMuseumData()
-    renderSidebar()
+    renderSidebar(true)
     renderScreen()
     showToast('Museum auto-curated.')
   } catch (error) {
@@ -1195,7 +1378,8 @@ async function submitMuseumRating() {
     await rateMuseum(owner, Math.min(5, Math.max(1, score)), review)
     document.getElementById('rate-modal')?.classList.remove('active')
     state.museum.leaderboard = await fetchMuseumLeaderboard()
-    renderSidebar()
+    markSidebarDirty()
+    renderSidebar(true)
     renderScreen()
     showToast('Museum rated.')
   } catch (error) {
@@ -1208,11 +1392,9 @@ function initMuseumScene() {
   try {
     const canvas = document.getElementById('museum-scene')
     if (!canvas) return
+    if (state.museumSceneReady && world.museumRenderer?.domElement === canvas) return
 
-    if (world.museumRenderer) {
-      world.museumRenderer.dispose()
-      world.museumRenderer = null
-    }
+    cleanupMuseumScene()
     world.museumScene = new THREE.Scene()
     world.museumScene.background = new THREE.Color('#071b30')
     world.museumCamera = new THREE.PerspectiveCamera(60, canvas.clientWidth / Math.max(canvas.clientHeight, 1), 0.1, 2000)
@@ -1270,6 +1452,7 @@ function initMuseumScene() {
     world.museumControls.minDistance = 10
     world.museumControls.maxDistance = 60
     world.museumControls.maxPolarAngle = Math.PI / 2.1
+    state.museumSceneReady = true
     animateMuseumScene()
   } catch (error) {
     console.error('Init museum scene error:', error)
@@ -1286,7 +1469,7 @@ function animateMuseumScene() {
     })
     world.museumControls?.update()
     world.museumRenderer.render(world.museumScene, world.museumCamera)
-    requestAnimationFrame(animateMuseumScene)
+    world.museumAnimationFrameId = requestAnimationFrame(animateMuseumScene)
   } catch (error) {
     console.error('Animate museum error:', error)
   }
@@ -1299,7 +1482,8 @@ async function bootstrapApp() {
     state.history = await fetchDiveHistory()
     await loadMuseumData()
     appShell()
-    renderSidebar()
+    markSidebarDirty()
+    renderSidebar(true)
     renderScreen()
   } catch (error) {
     console.error('Bootstrap error:', error)
