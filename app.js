@@ -456,7 +456,7 @@ function renderDiveScreen() {
             <div class="glass minimap"><canvas id="minimap"></canvas></div>
             <div class="glass controls-box ${hudCollapsedClass}">
               <strong>Touch & Pilot</strong>
-              <p>Drag on open water to look around. Use the thumb cluster for movement, depth control, boost, and scanning. Long-press menus and text selection are suppressed only on control buttons so copy and paste still work elsewhere.</p>
+              <p>Drag on open water to look around. Use the thumb cluster for movement, depth control, boost, and scanning. Long-press suppression is limited to the control buttons so copy and paste still work in forms and other UI.</p>
             </div>
           </div>
         </div>
@@ -640,6 +640,8 @@ function renderScreen() {
   } else {
     cleanupMuseumScene()
   }
+  const mainView = document.getElementById('main-view')
+  if (mainView) mainView.scrollTop = 0
   markSidebarDirty()
   renderSidebar()
 }
