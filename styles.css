@@ -23,7 +23,8 @@ body {
     radial-gradient(circle at bottom, rgba(78,205,196,0.12), transparent 28%),
     linear-gradient(180deg, #020814 0%, #04111f 35%, #01060d 100%);
   color: var(--text);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   -webkit-tap-highlight-color: transparent;
 }
 button, input, textarea { font: inherit; }
@@ -194,6 +195,7 @@ button { cursor: pointer; }
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;
+  height: 100%;
   scrollbar-gutter: stable;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
@@ -298,25 +300,29 @@ button { cursor: pointer; }
 }
 .hud-top, .hud-bottom {
   position: absolute;
-  left: 32px;
-  right: 32px;
+  left: 40px;
+  right: 40px;
   display: flex;
   justify-content: space-between;
-  gap: 24px;
+  gap: 28px;
 }
-.hud-top { top: 28px; align-items: flex-start; }
-.hud-bottom { bottom: 30px; align-items: flex-end; }
+.hud-top { top: 34px; align-items: flex-start; }
+.hud-bottom { bottom: 38px; align-items: flex-end; }
 .glass {
   pointer-events: auto;
-  background: rgba(4, 16, 29, 0.68);
-  border: 1px solid rgba(143,199,230,0.16);
-  border-radius: 20px;
-  backdrop-filter: blur(16px);
+  background: rgba(4, 16, 29, 0.62);
+  border: 1px solid rgba(143,199,230,0.14);
+  border-radius: 22px;
+  backdrop-filter: blur(18px);
   box-shadow: var(--card-shadow);
 }
-.objective-box, .scan-box, .controls-box {
+.objective-box, .scan-box {
+  padding: 20px 22px;
+  max-width: min(420px, 30vw);
+}
+.controls-box {
   padding: 18px 20px;
-  max-width: min(360px, 28vw);
+  max-width: min(340px, 26vw);
 }
 .objective-box {
   display: flex;
@@ -348,8 +354,8 @@ button { cursor: pointer; }
   gap: 8px;
 }
 .hud-toggle {
-  width: 38px;
-  height: 38px;
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
   display: inline-grid;
   place-items: center;
@@ -361,8 +367,8 @@ button { cursor: pointer; }
 .controls-box strong { display: block; margin-bottom: 8px; }
 .controls-box p { margin: 0; color: var(--muted); line-height: 1.6; }
 .minimap {
-  width: 184px;
-  height: 184px;
+  width: 200px;
+  height: 200px;
   padding: 14px;
   flex-shrink: 0;
 }
@@ -374,8 +380,8 @@ button { cursor: pointer; }
 }
 .floating-controls {
   position: absolute;
-  right: 32px;
-  bottom: 32px;
+  right: 40px;
+  bottom: 40px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -392,25 +398,34 @@ button { cursor: pointer; }
   gap: 12px;
 }
 .joystick-cluster {
+  position: relative;
   display: grid;
-  grid-template-columns: 72px 72px 72px;
-  grid-template-rows: 72px 72px 72px;
+  grid-template-columns: 82px 82px 82px;
+  grid-template-rows: 82px 82px 82px;
   gap: 12px;
-  padding: 18px;
-  border-radius: 28px;
-  background: rgba(4, 16, 29, 0.74);
+  padding: 20px;
+  border-radius: 32px;
+  background: rgba(4, 16, 29, 0.72);
   border: 1px solid rgba(143,199,230,0.16);
   backdrop-filter: blur(18px);
   box-shadow: var(--card-shadow);
 }
+.joystick-cluster::before {
+  content: '';
+  position: absolute;
+  inset: 18px;
+  border-radius: 28px;
+  border: 1px solid rgba(143,199,230,0.08);
+  pointer-events: none;
+}
 .chip-btn {
-  min-width: 72px;
-  min-height: 72px;
+  min-width: 82px;
+  min-height: 82px;
   padding: 12px 16px;
   background: rgba(6, 21, 38, 0.84);
   color: var(--text);
   border: 1px solid rgba(143,199,230,0.18);
-  border-radius: 22px;
+  border-radius: 26px;
   box-shadow: var(--card-shadow);
   touch-action: manipulation;
   -webkit-user-select: none;
@@ -422,8 +437,8 @@ button { cursor: pointer; }
   color: #03202f;
 }
 .chip-btn.utility {
-  min-width: 72px;
-  min-height: 72px;
+  min-width: 82px;
+  min-height: 82px;
 }
 .chip-btn.forward { grid-column: 2; grid-row: 1; }
 .chip-btn.left { grid-column: 1; grid-row: 2; }
@@ -520,18 +535,18 @@ button { cursor: pointer; }
 }
 .gameplay-shell {
   position: relative;
-  min-height: max(980px, calc(100vh - 92px));
+  min-height: max(1080px, calc(100vh - 92px));
   overflow: hidden;
 }
 .gameplay-shell.cinematic .hud-top,
 .gameplay-shell.cinematic .hud-bottom,
 .gameplay-shell.cinematic .controls-box {
-  opacity: 0.18;
+  opacity: 0.08;
 }
 .gameplay-shell.cinematic .objective-box,
 .gameplay-shell.cinematic .scan-box,
 .gameplay-shell.cinematic .minimap {
-  transform: scale(0.96);
+  transform: scale(0.92);
 }
 .gameplay-shell.cinematic .floating-controls {
   bottom: 24px;
@@ -630,7 +645,8 @@ button { cursor: pointer; }
   .navbar { display: block; }
   .main-view { padding-bottom: 96px; }
   .hud-top, .hud-bottom { left: 18px; right: 18px; }
-  .objective-box, .scan-box, .controls-box { max-width: min(420px, 82vw); }
+  .objective-box, .scan-box { max-width: min(460px, 84vw); }
+  .controls-box { max-width: min(360px, 72vw); }
   .gameplay-shell {
     min-height: calc(100vh - 170px);
   }
@@ -663,15 +679,15 @@ button { cursor: pointer; }
     gap: 12px;
   }
   .joystick-cluster {
-    grid-template-columns: 64px 64px 64px;
-    grid-template-rows: 64px 64px 64px;
+    grid-template-columns: 70px 70px 70px;
+    grid-template-rows: 70px 70px 70px;
     gap: 10px;
-    padding: 14px;
+    padding: 16px;
   }
   .chip-btn,
   .chip-btn.utility {
-    min-width: 64px;
-    min-height: 64px;
+    min-width: 70px;
+    min-height: 70px;
   }
 }
 @media (max-width: 520px) {
@@ -713,17 +729,17 @@ button { cursor: pointer; }
     gap: 8px;
   }
   .joystick-cluster {
-    grid-template-columns: 56px 56px 56px;
-    grid-template-rows: 56px 56px 56px;
+    grid-template-columns: 60px 60px 60px;
+    grid-template-rows: 60px 60px 60px;
     gap: 8px;
     padding: 12px;
   }
   .chip-btn,
   .chip-btn.utility {
-    min-width: 56px;
-    min-height: 56px;
+    min-width: 60px;
+    min-height: 60px;
     padding: 10px 12px;
-    border-radius: 18px;
+    border-radius: 20px;
   }
   .gameplay-shell {
     min-height: calc(100vh - 188px);
