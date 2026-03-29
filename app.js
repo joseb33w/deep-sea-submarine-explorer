@@ -420,44 +420,46 @@ function renderSidebar(force = false) {
 function renderDiveScreen() {
   return `
     <section class="screen ${state.currentView === 'dive' ? 'active' : ''}" id="screen-dive">
-      <div class="canvas-wrap"><canvas id="scene"></canvas></div>
-      <div class="hud">
-        <div class="hud-top">
-          <div class="glass objective-box">
-            <div class="objective-title">Current Mission</div>
-            <div class="objective-text">${state.dive.objective}</div>
+      <div class="gameplay-shell">
+        <div class="canvas-wrap"><canvas id="scene"></canvas></div>
+        <div class="hud">
+          <div class="hud-top">
+            <div class="glass objective-box">
+              <div class="objective-title">Current Mission</div>
+              <div class="objective-text">${state.dive.objective}</div>
+            </div>
+            <div class="glass scan-box">
+              <div class="scan-title">Nearest Signal</div>
+              <div id="scan-details">Sweep the waters to locate creatures, vents, wrecks, and caves.</div>
+            </div>
           </div>
-          <div class="glass scan-box">
-            <div class="scan-title">Nearest Signal</div>
-            <div id="scan-details">Sweep the waters to locate creatures, vents, wrecks, and caves.</div>
+          <div class="hud-bottom">
+            <div class="glass minimap"><canvas id="minimap"></canvas></div>
+            <div class="glass controls-box">
+              <strong>Touch & Pilot</strong>
+              <p>Drag on open water to look around. Hold movement buttons to thrust, descend, ascend, and boost. Buttons are set up to avoid long-press selection interference while you play.</p>
+            </div>
           </div>
         </div>
-        <div class="hud-bottom">
-          <div class="glass minimap"><canvas id="minimap"></canvas></div>
-          <div class="glass controls-box">
-            <strong>Touch & Pilot</strong>
-            <p>Drag on the water to look around. Use the controls to thrust, descend, ascend, and boost. Surface before oxygen or battery runs dry.</p>
+        <div class="floating-controls">
+          <div class="action-row">
+            <button class="chip-btn" data-move="forward">▲</button>
+            <button class="chip-btn" data-move="boost">⚡</button>
+            <button class="chip-btn" data-move="down">⬇</button>
+          </div>
+          <div class="action-row">
+            <button class="chip-btn" data-move="left">◀</button>
+            <button class="chip-btn" id="scan-btn">🔎</button>
+            <button class="chip-btn" data-move="right">▶</button>
+          </div>
+          <div class="action-row">
+            <button class="chip-btn" data-move="backward">▼</button>
+            <button class="chip-btn" id="photo-btn">📷</button>
+            <button class="chip-btn" data-move="up">⬆</button>
           </div>
         </div>
+        <div class="error-banner hidden" id="error-banner"></div>
       </div>
-      <div class="floating-controls">
-        <div class="action-row">
-          <button class="chip-btn" data-move="forward">▲</button>
-          <button class="chip-btn" data-move="boost">⚡</button>
-          <button class="chip-btn" data-move="down">⬇</button>
-        </div>
-        <div class="action-row">
-          <button class="chip-btn" data-move="left">◀</button>
-          <button class="chip-btn" id="scan-btn">🔎</button>
-          <button class="chip-btn" data-move="right">▶</button>
-        </div>
-        <div class="action-row">
-          <button class="chip-btn" data-move="backward">▼</button>
-          <button class="chip-btn" id="photo-btn">📷</button>
-          <button class="chip-btn" data-move="up">⬆</button>
-        </div>
-      </div>
-      <div class="error-banner hidden" id="error-banner"></div>
     </section>
   `
 }
@@ -624,6 +626,37 @@ function renderScreen() {
   renderSidebar()
 }
 
+function bindHoldButton(button, key) {
+  if (!button || button.dataset.boundHold === 'true') return
+  button.dataset.boundHold = 'true'
+
+  const activate = (event) => {
+    event.preventDefault()
+    state.movement[key] = true
+    button.classList.add('active')
+  }
+
+  const deactivate = (event) => {
+    if (event) event.preventDefault()
+    state.movement[key] = false
+    button.classList.remove('active')
+  }
+
+  button.addEventListener('pointerdown', activate)
+  button.addEventListener('pointerup', deactivate)
+  button.addEventListener('pointercancel', deactivate)
+  button.addEventListener('pointerleave', deactivate)
+  button.addEventListener('lostpointercapture', deactivate)
+  button.addEventListener('contextmenu', (event) => event.preventDefault())
+}
+
+function clearAllMovement() {
+  Object.keys(state.movement).forEach((key) => {
+    state.movement[key] = false
+  })
+  document.querySelectorAll('[data-move].active').forEach((button) => button.classList.remove('active'))
+}
+
 function bindShellEvents() {
   if (state.shellBound) return
   try {
@@ -640,25 +673,12 @@ function bindShellEvents() {
       })
     })
 
-    document.getElementById('main-view')?.addEventListener('pointerdown', (event) => {
-      const moveButton = event.target.closest('[data-move]')
-      if (!moveButton) return
-      const key = moveButton.dataset.move
-      state.movement[key] = true
-      moveButton.classList.add('active')
+    document.querySelectorAll('[data-move]').forEach((button) => {
+      bindHoldButton(button, button.dataset.move)
     })
 
-    const releaseMove = (event) => {
-      const moveButton = event.target.closest('[data-move]')
-      if (!moveButton) return
-      const key = moveButton.dataset.move
-      state.movement[key] = false
-      moveButton.classList.remove('active')
-    }
-
-    document.getElementById('main-view')?.addEventListener('pointerup', releaseMove)
-    document.getElementById('main-view')?.addEventListener('pointercancel', releaseMove)
-    document.getElementById('main-view')?.addEventListener('pointerleave', releaseMove)
+    window.addEventListener('pointerup', clearAllMovement)
+    window.addEventListener('blur', clearAllMovement)
 
     document.getElementById('main-view')?.addEventListener('click', async (event) => {
       const scanButton = event.target.closest('#scan-btn')
@@ -767,6 +787,7 @@ function cleanupDiveScene(resetReady = true) {
   state.touch.targetPitchDelta = 0
   state.touch.yawVelocity = 0
   state.touch.pitchVelocity = 0
+  clearAllMovement()
   if (resetReady) state.sceneReady = false
 }
 
@@ -994,6 +1015,7 @@ function bindCanvasLook(canvas) {
   if (world.diveCanvasHandlersBound && world.diveCanvas === canvas) return
   try {
     canvas.addEventListener('pointerdown', (event) => {
+      if (event.target.closest('[data-move], #scan-btn, #photo-btn')) return
       state.touch.active = true
       state.touch.pointerId = event.pointerId
       state.touch.x = event.clientX
