@@ -32,7 +32,9 @@ const state = {
     cargo: [],
     discoveries: [],
     lastSurfaceAt: Date.now(),
-    objective: 'Descend into the glow fields and scan rare lifeforms.'
+    objective: 'Descend into the glow fields and scan rare lifeforms.',
+    hudCollapsed: false,
+    cinematicMode: false
   },
   museum: {
     exhibits: [],
@@ -418,44 +420,60 @@ function renderSidebar(force = false) {
 }
 
 function renderDiveScreen() {
+  const hudCollapsedClass = state.dive.hudCollapsed ? 'compact' : ''
+  const cinematicClass = state.dive.cinematicMode ? 'cinematic' : ''
   return `
     <section class="screen ${state.currentView === 'dive' ? 'active' : ''}" id="screen-dive">
-      <div class="gameplay-shell">
+      <div class="gameplay-shell ${cinematicClass}" id="gameplay-shell">
         <div class="canvas-wrap"><canvas id="scene"></canvas></div>
         <div class="hud">
           <div class="hud-top">
-            <div class="glass objective-box">
-              <div class="objective-title">Current Mission</div>
-              <div class="objective-text">${state.dive.objective}</div>
+            <div class="glass objective-box ${hudCollapsedClass}">
+              <div class="hud-header-row">
+                <div class="hud-copy">
+                  <div class="objective-title">Current Mission</div>
+                  <div class="objective-text">${state.dive.objective}</div>
+                </div>
+                <button class="hud-toggle" id="toggle-hud-btn" aria-label="Toggle HUD">${state.dive.hudCollapsed ? '＋' : '－'}</button>
+              </div>
+              <div class="scan-meta">
+                <span class="badge">O₂ ${Math.round(state.dive.oxygen)}%</span>
+                <span class="badge">Battery ${Math.round(state.dive.battery)}%</span>
+                <span class="badge">Depth ${Math.round(state.dive.depth)} m</span>
+              </div>
             </div>
-            <div class="glass scan-box">
-              <div class="scan-title">Nearest Signal</div>
-              <div id="scan-details">Sweep the waters to locate creatures, vents, wrecks, and caves.</div>
+            <div class="glass scan-box ${hudCollapsedClass}">
+              <div class="hud-header-row">
+                <div class="hud-copy">
+                  <div class="scan-title">Nearest Signal</div>
+                  <div id="scan-details">Sweep the waters to locate creatures, vents, wrecks, and caves.</div>
+                </div>
+                <button class="hud-toggle" id="toggle-cinematic-btn" aria-label="Toggle cinematic mode">${state.dive.cinematicMode ? '⤢' : '⤡'}</button>
+              </div>
             </div>
           </div>
           <div class="hud-bottom">
             <div class="glass minimap"><canvas id="minimap"></canvas></div>
-            <div class="glass controls-box">
+            <div class="glass controls-box ${hudCollapsedClass}">
               <strong>Touch & Pilot</strong>
-              <p>Drag on open water to look around. Hold movement buttons to thrust, descend, ascend, and boost. Buttons are set up to avoid long-press selection interference while you play.</p>
+              <p>Drag on open water to look around. Use the thumb cluster for movement, depth control, boost, and scanning. Long-press menus and text selection are suppressed only on control buttons so copy and paste still work elsewhere.</p>
             </div>
           </div>
         </div>
         <div class="floating-controls">
-          <div class="action-row">
-            <button class="chip-btn" data-move="forward">▲</button>
-            <button class="chip-btn" data-move="boost">⚡</button>
-            <button class="chip-btn" data-move="down">⬇</button>
+          <div class="control-utility-row">
+            <button class="chip-btn utility" id="photo-btn">📷</button>
           </div>
-          <div class="action-row">
-            <button class="chip-btn" data-move="left">◀</button>
-            <button class="chip-btn" id="scan-btn">🔎</button>
-            <button class="chip-btn" data-move="right">▶</button>
-          </div>
-          <div class="action-row">
-            <button class="chip-btn" data-move="backward">▼</button>
-            <button class="chip-btn" id="photo-btn">📷</button>
-            <button class="chip-btn" data-move="up">⬆</button>
+          <div class="joystick-cluster" aria-label="Submarine controls">
+            <button class="chip-btn up" data-move="up">⬆</button>
+            <button class="chip-btn forward" data-move="forward">▲</button>
+            <button class="chip-btn down" data-move="down">⬇</button>
+            <button class="chip-btn left" data-move="left">◀</button>
+            <button class="chip-btn center" id="scan-btn">🔎</button>
+            <button class="chip-btn right" data-move="right">▶</button>
+            <button class="chip-btn boost" data-move="boost">⚡</button>
+            <button class="chip-btn backward" data-move="backward">▼</button>
+            <button class="chip-btn scan" data-move="none" style="visibility:hidden; pointer-events:none;">•</button>
           </div>
         </div>
         <div class="error-banner hidden" id="error-banner"></div>
@@ -627,17 +645,21 @@ function renderScreen() {
 }
 
 function bindHoldButton(button, key) {
-  if (!button || button.dataset.boundHold === 'true') return
+  if (!button || button.dataset.boundHold === 'true' || key === 'none') return
   button.dataset.boundHold = 'true'
 
   const activate = (event) => {
     event.preventDefault()
+    event.stopPropagation()
     state.movement[key] = true
     button.classList.add('active')
   }
 
   const deactivate = (event) => {
-    if (event) event.preventDefault()
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
     state.movement[key] = false
     button.classList.remove('active')
   }
@@ -686,6 +708,20 @@ function bindShellEvents() {
 
       const photoButton = event.target.closest('#photo-btn')
       if (photoButton) return capturePhoto()
+
+      const toggleHudButton = event.target.closest('#toggle-hud-btn')
+      if (toggleHudButton) {
+        state.dive.hudCollapsed = !state.dive.hudCollapsed
+        renderScreen()
+        return
+      }
+
+      const toggleCinematicButton = event.target.closest('#toggle-cinematic-btn')
+      if (toggleCinematicButton) {
+        state.dive.cinematicMode = !state.dive.cinematicMode
+        renderScreen()
+        return
+      }
 
       const autoCurateButton = event.target.closest('#auto-curate-btn')
       if (autoCurateButton) return autoCurateMuseum()
@@ -1015,7 +1051,7 @@ function bindCanvasLook(canvas) {
   if (world.diveCanvasHandlersBound && world.diveCanvas === canvas) return
   try {
     canvas.addEventListener('pointerdown', (event) => {
-      if (event.target.closest('[data-move], #scan-btn, #photo-btn')) return
+      if (event.target.closest('[data-move], #scan-btn, #photo-btn, #toggle-hud-btn, #toggle-cinematic-btn')) return
       state.touch.active = true
       state.touch.pointerId = event.pointerId
       state.touch.x = event.clientX
